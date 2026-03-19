@@ -1,0 +1,102 @@
+.header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0.75rem 1.5rem;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.logo {
+  font-weight: 700;
+  font-size: 1.35rem;
+  color: var(--accent);
+  letter-spacing: -0.02em;
+}
+
+.nav {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.nav-link {
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.nav-link:hover {
+  color: var(--text);
+  background: var(--surface2);
+}
+
+.nav-link.active {
+  color: var(--accent);
+  background: rgba(0, 212, 170, 0.1);
+}
+
+.wallet {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.chain-warn {
+  font-size: 0.8rem;
+  color: var(--warning);
+}
+
+.error-msg {
+  font-size: 0.8rem;
+  color: var(--danger);
+}
+
+.address {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  padding: 0.4rem 0.75rem;
+  background: var(--surface2);
+  border-radius: 8px;
+}
+
+.connect-btn {
+  padding: 0.5rem 1rem;
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.connect-btn:hover:not(:disabled) {
+  background: var(--accent-dim);
+}
+
+.connect-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .nav {
+    order: 3;
+    width: 100%;
+  }
+  .header-inner {
+    flex-wrap: wrap;
+  }
+}
