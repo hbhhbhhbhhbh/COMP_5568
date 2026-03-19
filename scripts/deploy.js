@@ -1,9 +1,6 @@
 /**
- * Hardhat deployment script for local or testnet.
- * Run: npx hardhat run scripts/deploy.js --network localhost
- * Or: npx hardhat run scripts/deploy.js --network sepolia
- *
- * For Remix deployment, use the steps in README.md instead.
+ * Deploy PCOLBUSDPool: 单一池 COL+BUSD，存入得 PCOL/PBUSD 凭证，抵押 PCOL 借 BUSD、抵押 PBUSD 借 COL.
+ * Run: npx hardhat run scripts/deploy-pcolbusd.js --network localhost
  */
 
 const hre = require('hardhat');
@@ -12,77 +9,71 @@ async function main() {
   const [deployer] = await hre.ethers.getSigners();
   console.log('Deploying with account:', deployer.address);
 
-  // 1. Deploy Mock tokens (collateral and borrow)
   const MockERC20 = await hre.ethers.getContractFactory('MockERC20');
-  const collateralToken = await MockERC20.deploy('Collateral', 'COL', 18);
-  await collateralToken.waitForDeployment();
-  const collateralAddress = await collateralToken.getAddress();
-  console.log('Collateral token (COL):', collateralAddress);
+  const col = await MockERC20.deploy('Collateral', 'COL', 18);
+  await col.waitForDeployment();
+  const colAddr = await col.getAddress();
+  console.log('COL:', colAddr);
 
-  const borrowToken = await MockERC20.deploy('Borrow USD', 'BUSD', 18);
-  await borrowToken.waitForDeployment();
-  const borrowAddress = await borrowToken.getAddress();
-  console.log('Borrow token (BUSD):', borrowAddress);
+  const busd = await MockERC20.deploy('Borrow USD', 'BUSD', 18);
+  await busd.waitForDeployment();
+  const busdAddr = await busd.getAddress();
+  console.log('BUSD:', busdAddr);
 
-  // 2. Deploy PriceOracle
-  const PriceOracle = await hre.ethers.getContractFactory('PriceOracle');
-  const oracle = await PriceOracle.deploy();
-  await oracle.waitForDeployment();
-  const oracleAddress = await oracle.getAddress();
-  console.log('PriceOracle:', oracleAddress);
-
-  // Set fallback prices for mock tokens (8 decimals, e.g. 2000 = $2000 for COL, 1 = $1 for BUSD)
-  await oracle.setFallbackPrice(collateralAddress, hre.ethers.parseUnits('2000', 8));
-  await oracle.setFallbackPrice(borrowAddress, hre.ethers.parseUnits('1', 8));
-
-  // 3. Deploy GovernanceToken
   const GovernanceToken = await hre.ethers.getContractFactory('GovernanceToken');
-  const govToken = await GovernanceToken.deploy('Governance', 'GOV');
-  await govToken.waitForDeployment();
-  const govTokenAddress = await govToken.getAddress();
-  console.log('GovernanceToken:', govTokenAddress);
+  const gov = await GovernanceToken.deploy('Governance', 'GOV');
+  await gov.waitForDeployment();
+  const govAddr = await gov.getAddress();
+  console.log('GovernanceToken:', govAddr);
 
-  // 4. Deploy LendingPool
-  const LendingPool = await hre.ethers.getContractFactory('LendingPool');
-  const pool = await LendingPool.deploy(
-    collateralAddress,
-    borrowAddress,
-    oracleAddress,
-    govTokenAddress
-  );
+  const PCOLBUSDPool = await hre.ethers.getContractFactory('PCOLBUSDPool');
+  const pool = await PCOLBUSDPool.deploy(colAddr, busdAddr, govAddr);
   await pool.waitForDeployment();
-  const poolAddress = await pool.getAddress();
-  console.log('LendingPool:', poolAddress);
+  const poolAddr = await pool.getAddress();
+  console.log('PCOLBUSDPool:', poolAddr);
 
-  // 5. Set lending pool in GovernanceToken (so it can mint rewards)
-  await govToken.setLendingPool(poolAddress);
+  await gov.setLendingPool(poolAddr);
 
-  // 6. Deploy FlashLoanReceiverExample
+  const pcolAddr = await pool.pcolToken();
+  const pbusdAddr = await pool.pbusdToken();
+  console.log('PCOL:', pcolAddr);
+  console.log('PBUSD:', pbusdAddr);
+
   const FlashLoanReceiverExample = await hre.ethers.getContractFactory('FlashLoanReceiverExample');
-  const receiver = await FlashLoanReceiverExample.deploy(poolAddress);
+  const receiver = await FlashLoanReceiverExample.deploy(poolAddr);
   await receiver.waitForDeployment();
-  const receiverAddress = await receiver.getAddress();
-  console.log('FlashLoanReceiverExample:', receiverAddress);
+  const receiverAddr = await receiver.getAddress();
+  console.log('FlashLoanReceiverExample:', receiverAddr);
 
-  // Seed pool with borrow token so users can borrow
-  const seedAmount = hre.ethers.parseUnits('1000000', 18);
-  await borrowToken.mint(deployer.address, seedAmount);
-  await borrowToken.connect(deployer).transfer(poolAddress, seedAmount);
-  console.log('Seeded pool with 1,000,000 BUSD');
+  const seedCol = hre.ethers.parseUnits('500', 18);
+  const seedBusd = hre.ethers.parseUnits('10000', 18);
+  await col.mint(deployer.address, seedCol);
+  await busd.mint(deployer.address, seedBusd);
+  await col.approve(poolAddr, seedCol);
+  await busd.approve(poolAddr, seedBusd);
+  await pool.depositCOL(seedCol);
+  await pool.depositBUSD(seedBusd);
+  console.log('Seeded pool: 500 COL, 1,000,000 BUSD');
 
-  // Mint some collateral and borrow tokens to deployer for testing
-  await collateralToken.mint(deployer.address, hre.ethers.parseUnits('100', 18));
-  await borrowToken.mint(deployer.address, hre.ethers.parseUnits('10000', 18));
-  console.log('Minted test tokens to deployer');
+  const signers = await hre.ethers.getSigners();
+  const perCol = hre.ethers.parseUnits('10000000000', 18);
+  const perBusd = hre.ethers.parseUnits('10000000', 18);
+  for (const a of signers) {
+    await col.mint(a.address, perCol);
+    await busd.mint(a.address, perBusd);
+  }
+  console.log('Minted 100 COL, 10,000 BUSD to', signers.length, 'accounts');
 
-  console.log('\n--- Summary ---');
-  console.log('VITE_LENDING_POOL=' + poolAddress);
-  console.log('VITE_PRICE_ORACLE=' + oracleAddress);
-  console.log('VITE_GOVERNANCE_TOKEN=' + govTokenAddress);
-  console.log('VITE_COLLATERAL_ASSET=' + collateralAddress);
-  console.log('VITE_BORROW_ASSET=' + borrowAddress);
-  console.log('VITE_FLASH_LOAN_RECEIVER=' + receiverAddress);
-  console.log('\nAdd these to frontend/.env and restart the frontend.');
+  console.log('\n--- frontend .env ---');
+  console.log('VITE_CHAIN_ID=31337');
+  console.log('VITE_LENDING_POOL=' + poolAddr);
+  console.log('VITE_GOVERNANCE_TOKEN=' + govAddr);
+  console.log('VITE_COLLATERAL_ASSET=' + colAddr);
+  console.log('VITE_BORROW_ASSET=' + busdAddr);
+  console.log('VITE_PCOL_TOKEN=' + pcolAddr);
+  console.log('VITE_PBUSD_TOKEN=' + pbusdAddr);
+  console.log('VITE_FLASH_LOAN_RECEIVER=' + receiverAddr);
+  console.log('\nPCOL/PBUSD 为池内凭证，不加入池子；存入 COL 得 PCOL、存入 BUSD 得 PBUSD；取款 1:1；抵押 PCOL 借 BUSD、抵押 PBUSD 借 COL.');
 }
 
 main().catch((err) => {
