@@ -264,6 +264,30 @@ contract LendingPool is ReentrancyGuard {
     }
 
     /**
+     * @dev Maximum borrow amount for a user so that health factor stays >= 1.
+     * Capped by pool available liquidity. Returns 0 if no collateral or already at limit.
+     */
+    function getMaxBorrow(address user) external view returns (uint256) {
+        UserPosition storage pos = positions[user];
+        if (pos.collateral == 0) return 0;
+
+        uint256 colPrice = oracle.getPrice(collateralAsset);
+        uint256 debtPrice = oracle.getPrice(borrowAsset);
+        if (debtPrice == 0) return 0;
+
+        uint256 collateralValue = pos.collateral * colPrice;
+        uint256 debtValue = pos.debt * debtPrice;
+        uint256 maxDebtValue = (collateralValue * liquidationThreshold) / BPS;
+        if (maxDebtValue <= debtValue) return 0;
+
+        uint256 maxAdditionalDebtValue = maxDebtValue - debtValue;
+        uint256 maxBorrowByHF = maxAdditionalDebtValue / debtPrice;
+
+        uint256 available = IERC20(borrowAsset).balanceOf(address(this));
+        return maxBorrowByHF > available ? available : maxBorrowByHF;
+    }
+
+    /**
      * @dev Get flash loan fee for a given amount.
      */
     function getFlashLoanFee(uint256 amount) external view returns (uint256) {
