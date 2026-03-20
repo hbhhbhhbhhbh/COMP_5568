@@ -1,20 +1,20 @@
 import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import {
-  getAccount,
   addresses,
   getFlashLoanFee,
   getTokenBalance,
   getTokenInfo,
-  getTokenAllowance,
   approveToken,
-  flashLoan,
+  getTokenAllowance,
+  requestFlashLoanViaReceiver,
 } from '../utils/web3';
+import { useWallet } from '../context/WalletContext';
 import './Page.css';
 
 export default function FlashLoanPage() {
-  const [user, setUser] = useState(null);
-  const [asset, setAsset] = useState(addresses.borrowAsset || '');
+  const { user } = useWallet();
+  const [asset, setAsset] = useState(addresses.borrowAsset || addresses.collateralAsset || '');
   const [amount, setAmount] = useState('');
   const [fee, setFee] = useState(null);
   const [balance, setBalance] = useState(0n);
@@ -24,10 +24,6 @@ export default function FlashLoanPage() {
   const [loading, setLoading] = useState(false);
 
   const receiverAddress = addresses.flashLoanReceiver;
-
-  useEffect(() => {
-    getAccount().then(setUser);
-  }, []);
 
   useEffect(() => {
     if (!asset || !user) return;
@@ -54,17 +50,23 @@ export default function FlashLoanPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!amount || !user || !receiverAddress) {
-      setTx({ status: 'error', hash: 'Flash loan receiver not configured. Deploy FlashLoanReceiverExample and set address.' });
+      setTx({ status: 'error', hash: 'Please configure VITE_FLASH_LOAN_RECEIVER (FlashLoanReceiverExample contract address)' });
       return;
     }
     setLoading(true);
     setTx({ status: '', hash: '' });
     try {
       const amountWei = ethers.parseUnits(amount, decimals);
-      const params = '0x';
-      const receipt = await flashLoan(receiverAddress, asset, amountWei, params);
+      const feeWei = await getFlashLoanFee(amountWei);
+      if (balance < feeWei) throw new Error(`Required fee: ${ethers.formatUnits(feeWei, decimals)} ${symbol}; insufficient balance`);
+      const pool = addresses.lendingPool;
+      const allowance = await getTokenAllowance(asset, user, receiverAddress);
+      if (allowance < feeWei) await approveToken(asset, receiverAddress, ethers.MaxUint256);
+      const receipt = await requestFlashLoanViaReceiver(receiverAddress, asset, amountWei);
       setTx({ status: 'success', hash: receipt.hash });
       setAmount('');
+      const newBal = await getTokenBalance(asset, user);
+      setBalance(newBal);
     } catch (err) {
       setTx({ status: 'error', hash: err.message || 'Transaction failed' });
     } finally {
@@ -75,18 +77,29 @@ export default function FlashLoanPage() {
   return (
     <div className="page">
       <h1>Flash Loan</h1>
-      <p className="muted">Request a flash loan. The receiver contract must repay principal + fee in the same transaction. Use the example receiver address if deployed.</p>
+      <p className="muted">Select an asset and amount to start a flash loan. You must first approve the <strong>fee</strong> to the receiver contract. The receiver borrows from the pool and repays principal + fee in the same transaction. You only need at least the fee amount of {addresses.borrowAsset ? 'COL/BUSD' : 'the selected asset'}.</p>
       {!user && <p className="muted">Connect MetaMask first.</p>}
       {user && (
         <div className="card">
           {!receiverAddress && (
-            <p className="danger">Set VITE_FLASH_LOAN_RECEIVER in .env to the FlashLoanReceiverExample contract address.</p>
+            <p className="danger">Please set VITE_FLASH_LOAN_RECEIVER in .env to a deployed FlashLoanReceiverExample contract address.</p>
           )}
-          <p><strong>Asset:</strong> {symbol} ({asset ? `${asset.slice(0, 10)}...` : '—'})</p>
-          <p><strong>Your balance:</strong> {ethers.formatUnits(balance, decimals)} {symbol}</p>
+          <div className="form-group">
+            <label>Asset</label>
+            <select
+              value={asset}
+              onChange={(e) => setAsset(e.target.value)}
+              style={{ maxWidth: 320, padding: '0.6rem 0.75rem', borderRadius: 8 }}
+            >
+              {addresses.collateralAsset && <option value={addresses.collateralAsset}>COL</option>}
+              {addresses.borrowAsset && <option value={addresses.borrowAsset}>BUSD</option>}
+            </select>
+          </div>
+          <p><strong>Your Balance:</strong> {typeof balance === 'bigint' ? ethers.formatUnits(balance, decimals) : '0'} {symbol}</p>
+          <p className="form-hint">No collateral is needed for flash loans, but principal + fee must be repaid in the same transaction. You only need a balance >= fee in {symbol}.</p>
           <form onSubmit={handleSubmit}>
             <div className="form-group">
-              <label>Amount to flash borrow</label>
+              <label>Loan Amount</label>
               <input
                 type="text"
                 value={amount}
@@ -95,15 +108,15 @@ export default function FlashLoanPage() {
               />
             </div>
             {fee != null && (
-              <p className="form-hint">Fee: {ethers.formatUnits(fee, decimals)} {symbol}</p>
+              <p className="form-hint">Fee (approve to Receiver first): {typeof fee === 'bigint' ? ethers.formatUnits(fee, decimals) : String(fee)} {symbol}</p>
             )}
             <button type="submit" className="submit-btn" disabled={loading || !amount || !receiverAddress}>
-              {loading ? 'Executing...' : 'Execute Flash Loan'}
+              {loading ? 'Executing...' : 'Request Flash Loan'}
             </button>
           </form>
           {tx.status && (
             <p className={tx.status === 'success' ? 'success' : 'danger'} style={{ marginTop: '1rem' }}>
-              {tx.status === 'success' ? `Done. Tx: ${tx.hash}` : tx.hash}
+              {tx.status === 'success' ? `Success. Tx: ${tx.hash}` : tx.hash}
             </p>
           )}
         </div>
