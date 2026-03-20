@@ -55,16 +55,11 @@ export default function Dashboard() {
   const [supplyAPYCOL, setSupplyAPYCOL] = useState(0n);
   const [borrowAPYBUSD, setBorrowAPYBUSD] = useState(0n);
   const [borrowAPYCOL, setBorrowAPYCOL] = useState(0n);
-  const [poolColBal, setPoolColBal] = useState(0n);
-  const [poolBusdBal, setPoolBusdBal] = useState(0n);
-  const [govBal, setGovBal] = useState(0n);
   const [dec, setDec] = useState(18);
   const col = addresses.collateralAsset;
   const busd = addresses.borrowAsset;
-  const pool = addresses.lendingPool;
   const pcol = addresses.pcolToken;
   const pbusd = addresses.pbusdToken;
-  const govToken = addresses.governanceToken;
 
   useEffect(() => {
     if (!user || !col) return;
@@ -72,16 +67,12 @@ export default function Dashboard() {
   }, [user, col]);
 
   useEffect(() => {
-    if (!user || !col || !busd || !pcol || !pbusd || !pool) return;
-    const govPromise = govToken ? getTokenBalance(govToken, user) : Promise.resolve(0n);
+    if (!user || !col || !busd || !pcol || !pbusd) return;
     Promise.all([
       getTokenBalance(col, user),
       getTokenBalance(busd, user),
       getTokenBalance(pcol, user),
       getTokenBalance(pbusd, user),
-      getTokenBalance(col, pool),
-      getTokenBalance(busd, pool),
-      govPromise,
       getUserPositionPCOL(user),
       getUserPositionPBUSD(user),
       getHealthFactorPCOL(user),
@@ -94,14 +85,11 @@ export default function Dashboard() {
       getSupplyAPYCOL(),
       getBorrowAPYBUSD(),
       getBorrowAPYCOL(),
-    ]).then(([c, b, pc, pb, poolC, poolB, gov, pP, pB, hfP, hfB, prCol, prBusd, uB, uC, sB, sC, brB, brC]) => {
+    ]).then(([c, b, pc, pb, pP, pB, hfP, hfB, prCol, prBusd, uB, uC, sB, sC, brB, brC]) => {
       setColBal(c);
       setBusdBal(b);
       setPcolBal(pc);
       setPbusdBal(pb);
-      setPoolColBal(poolC);
-      setPoolBusdBal(poolB);
-      setGovBal(gov);
       setPosPCOL(pP);
       setPosPBUSD(pB);
       setHfPCOL(hfP);
@@ -115,7 +103,7 @@ export default function Dashboard() {
       setBorrowAPYBUSD(brB);
       setBorrowAPYCOL(brC);
     });
-  }, [user, col, busd, pcol, pbusd, pool, govToken]);
+  }, [user, col, busd, pcol, pbusd]);
 
   const priceColNum = priceCOL > 0n ? Number(priceCOL) / 1e8 : 0;
   const priceBusdNum = priceBUSD > 0n ? Number(priceBUSD) / 1e8 : 1;
@@ -136,8 +124,7 @@ export default function Dashboard() {
       {user && (
         <>
           <div className="card">
-            <h3>Pool</h3>
-            <p><strong>Pool Balances:</strong> COL {fmt(poolColBal, dec)} | BUSD {fmt(poolBusdBal, dec)}</p>
+            <h3>Pool rates</h3>
             <p><strong>Utilization:</strong> BUSD {fmtPct(utilBUSD)} | COL {fmtPct(utilCOL)}</p>
             <p><strong>Supply APY:</strong> BUSD {fmtPct(supplyAPYBUSD)} | COL {fmtPct(supplyAPYCOL)}</p>
             <p><strong>Borrow APY:</strong> BUSD {fmtPct(borrowAPYBUSD)} | COL {fmtPct(borrowAPYCOL)}</p>
@@ -150,7 +137,7 @@ export default function Dashboard() {
           </div>
           <div className="card">
             <h3>Wallet</h3>
-            <p>COL: {fmt(colBal, dec)} | BUSD: {fmt(busdBal, dec)} | PCOL: {fmt(pcolBal, dec)} | PBUSD: {fmt(pbusdBal, dec)} {govToken ? <>| GOV: {fmt(govBal, dec)} <span className="muted">(deposit/borrow rewards)</span></> : null}</p>
+            <p>COL: {fmt(colBal, dec)} | BUSD: {fmt(busdBal, dec)} | PCOL: {fmt(pcolBal, dec)} | PBUSD: {fmt(pbusdBal, dec)}</p>
           </div>
           {(posPCOL.collateralPCOL > 0n || posPCOL.debtBUSD > 0n) && (
             <div className="card">

@@ -50,7 +50,7 @@ export default function FlashLoanPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!amount || !user || !receiverAddress) {
-      setTx({ status: 'error', hash: 'Please configure VITE_FLASH_LOAN_RECEIVER (FlashLoanReceiverExample contract address)' });
+      setTx({ status: 'error', hash: '请配置 VITE_FLASH_LOAN_RECEIVER（FlashLoanReceiverExample 合约地址）' });
       return;
     }
     setLoading(true);
@@ -58,7 +58,7 @@ export default function FlashLoanPage() {
     try {
       const amountWei = ethers.parseUnits(amount, decimals);
       const feeWei = await getFlashLoanFee(amountWei);
-      if (balance < feeWei) throw new Error(`Required fee: ${ethers.formatUnits(feeWei, decimals)} ${symbol}; insufficient balance`);
+      if (balance < feeWei) throw new Error(`手续费需 ${ethers.formatUnits(feeWei, decimals)} ${symbol}，余额不足`);
       const pool = addresses.lendingPool;
       const allowance = await getTokenAllowance(asset, user, receiverAddress);
       if (allowance < feeWei) await approveToken(asset, receiverAddress, ethers.MaxUint256);
@@ -76,13 +76,13 @@ export default function FlashLoanPage() {
 
   return (
     <div className="page">
-      <h1>Flash Loan</h1>
-      <p className="muted">Select an asset and amount to start a flash loan. You must first approve the <strong>fee</strong> to the receiver contract. The receiver borrows from the pool and repays principal + fee in the same transaction. You only need at least the fee amount of {addresses.borrowAsset ? 'COL/BUSD' : 'the selected asset'}.</p>
+      <h1>Flash Loan 闪电贷</h1>
+      <p className="muted">选择资产与数量后发起闪电贷。需先向示例合约（Receiver）授权<strong>手续费</strong>，由 Receiver 向池子借出并在同一笔交易内归还本金+手续费。您只需持有至少等于手续费的 {addresses.borrowAsset ? 'COL/BUSD' : '资产'} 即可。</p>
       {!user && <p className="muted">Connect MetaMask first.</p>}
       {user && (
         <div className="card">
           {!receiverAddress && (
-            <p className="danger">Please set VITE_FLASH_LOAN_RECEIVER in .env to a deployed FlashLoanReceiverExample contract address.</p>
+            <p className="danger">请在 .env 中设置 VITE_FLASH_LOAN_RECEIVER 为已部署的 FlashLoanReceiverExample 合约地址。</p>
           )}
           <div className="form-group">
             <label>Asset</label>
@@ -95,11 +95,11 @@ export default function FlashLoanPage() {
               {addresses.borrowAsset && <option value={addresses.borrowAsset}>BUSD</option>}
             </select>
           </div>
-          <p><strong>Your Balance:</strong> {typeof balance === 'bigint' ? ethers.formatUnits(balance, decimals) : '0'} {symbol}</p>
-          <p className="form-hint">No collateral is needed for flash loans, but principal + fee must be repaid in the same transaction. You only need a balance >= fee in {symbol}.</p>
+          <p><strong>您的余额:</strong> {typeof balance === 'bigint' ? ethers.formatUnits(balance, decimals) : '0'} {symbol}</p>
+          <p className="form-hint">闪电贷无需抵押，同一笔交易内归还本金+手续费即可。您只需持有 ≥ 手续费的 {symbol}。</p>
           <form onSubmit={handleSubmit}>
             <div className="form-group">
-              <label>Loan Amount</label>
+              <label>借出数量</label>
               <input
                 type="text"
                 value={amount}
@@ -108,15 +108,15 @@ export default function FlashLoanPage() {
               />
             </div>
             {fee != null && (
-              <p className="form-hint">Fee (approve to Receiver first): {typeof fee === 'bigint' ? ethers.formatUnits(fee, decimals) : String(fee)} {symbol}</p>
+              <p className="form-hint">手续费（需提前授权给 Receiver）: {typeof fee === 'bigint' ? ethers.formatUnits(fee, decimals) : String(fee)} {symbol}</p>
             )}
             <button type="submit" className="submit-btn" disabled={loading || !amount || !receiverAddress}>
-              {loading ? 'Executing...' : 'Request Flash Loan'}
+              {loading ? '执行中...' : '发起闪电贷'}
             </button>
           </form>
           {tx.status && (
             <p className={tx.status === 'success' ? 'success' : 'danger'} style={{ marginTop: '1rem' }}>
-              {tx.status === 'success' ? `Success. Tx: ${tx.hash}` : tx.hash}
+              {tx.status === 'success' ? `成功。Tx: ${tx.hash}` : tx.hash}
             </p>
           )}
         </div>

@@ -117,20 +117,6 @@ export async function depositBUSD(amountWei) {
   return tx.wait();
 }
 
-/** 预计存入 amount COL 时收取的管理费（按价格影响：影响 1% 收 0.05%） */
-export async function getDepositFeeCOL(amountWei) {
-  const c = getPoolContractReadOnly();
-  if (!c) return 0n;
-  try { return await c.getDepositFeeCOL(amountWei); } catch { return 0n; }
-}
-
-/** 预计存入 amount BUSD 时收取的管理费 */
-export async function getDepositFeeBUSD(amountWei) {
-  const c = getPoolContractReadOnly();
-  if (!c) return 0n;
-  try { return await c.getDepositFeeBUSD(amountWei); } catch { return 0n; }
-}
-
 // ——— Withdraw (用 P 币 1:1 取回)
 export async function withdrawCOL(amountWei) {
   const c = getPoolContract();
@@ -143,31 +129,6 @@ export async function withdrawBUSD(amountWei) {
   const c = getPoolContract();
   if (!c) throw new Error('Wallet not connected');
   const tx = await c.withdrawBUSD(amountWei);
-  return tx.wait();
-}
-
-// ——— 测试用：向池内注入代币（不铸造 P 币），用于调节储备/价格以测试清算
-export async function injectCOL(amountWei) {
-  const c = getPoolContract();
-  if (!c) throw new Error('Wallet not connected');
-  const tx = await c.injectCOL(amountWei);
-  return tx.wait();
-}
-
-export async function injectBUSD(amountWei) {
-  const c = getPoolContract();
-  if (!c) throw new Error('Wallet not connected');
-  const tx = await c.injectBUSD(amountWei);
-  return tx.wait();
-}
-
-/** 测试用：直接向目标地址铸造代币（MockERC20.mint），不消耗用户余额。仅测试网/本地可用。 */
-export async function mintTokenTo(tokenAddress, toAddress, amountWei) {
-  const pool = getPoolContract();
-  if (!pool?.runner) throw new Error('Wallet not connected');
-  const { MOCK_ERC20_MINT_ABI } = await import('./abis');
-  const c = new ethers.Contract(tokenAddress, MOCK_ERC20_MINT_ABI, pool.runner);
-  const tx = await c.mint(toAddress, amountWei);
   return tx.wait();
 }
 
@@ -338,16 +299,12 @@ export async function getPriceBUSDIn8() {
 
 export async function getPoolParams() {
   const c = getPoolContractReadOnly();
-  if (!c) return { liquidationThresholdPCOL: 6500n, liquidationThresholdPBUSD: 8500n, liquidationBonus: 1000n };
+  if (!c) return { liquidationThreshold: 8000n, liquidationBonus: 1000n };
   try {
-    const [ltPCOL, ltPBUSD, lb] = await Promise.all([
-      c.liquidationThresholdPCOL(),
-      c.liquidationThresholdPBUSD(),
-      c.liquidationBonus(),
-    ]);
-    return { liquidationThresholdPCOL: ltPCOL, liquidationThresholdPBUSD: ltPBUSD, liquidationBonus: lb };
+    const [lt, lb] = await Promise.all([c.liquidationThreshold(), c.liquidationBonus()]);
+    return { liquidationThreshold: lt, liquidationBonus: lb };
   } catch {
-    return { liquidationThresholdPCOL: 6500n, liquidationThresholdPBUSD: 8500n, liquidationBonus: 1000n };
+    return { liquidationThreshold: 8000n, liquidationBonus: 1000n };
   }
 }
 
@@ -385,58 +342,6 @@ export async function getSupplyAPYCOL() {
   const c = getPoolContractReadOnly();
   if (!c) return 0n;
   try { return await c.getSupplyAPYCOL(); } catch { return 0n; }
-}
-
-/** 与合约一致，用于前端利率模拟 */
-export const BLOCKS_PER_YEAR = 2102400;
-
-export async function getBorrowRatePerBlockBUSD() {
-  const c = getPoolContractReadOnly();
-  if (!c) return 0n;
-  try { return await c.getBorrowRatePerBlockBUSD(); } catch { return 0n; }
-}
-
-export async function getBorrowRatePerBlockCOL() {
-  const c = getPoolContractReadOnly();
-  if (!c) return 0n;
-  try { return await c.getBorrowRatePerBlockCOL(); } catch { return 0n; }
-}
-
-/** 获取利率模型参数（拐点模型：U_opt, slope1, slope2，用于测试页模拟） */
-export async function getRateParams() {
-  const c = getPoolContractReadOnly();
-  if (!c) return null;
-  try {
-    const [
-      bBase, bS1, bS2, bOpt, bRes,
-      cBase, cS1, cS2, cOpt, cRes,
-    ] = await Promise.all([
-      c.baseRatePerBlockBUSD(),
-      c.slope1PerBlockBUSD(),
-      c.slope2PerBlockBUSD(),
-      c.optimalUtilizationBUSD(),
-      c.reserveFactorBpsBUSD(),
-      c.baseRatePerBlockCOL(),
-      c.slope1PerBlockCOL(),
-      c.slope2PerBlockCOL(),
-      c.optimalUtilizationCOL(),
-      c.reserveFactorBpsCOL(),
-    ]);
-    return {
-      baseRatePerBlockBUSD: bBase,
-      slope1PerBlockBUSD: bS1,
-      slope2PerBlockBUSD: bS2,
-      optimalUtilizationBUSD: bOpt,
-      reserveFactorBpsBUSD: bRes,
-      baseRatePerBlockCOL: cBase,
-      slope1PerBlockCOL: cS1,
-      slope2PerBlockCOL: cS2,
-      optimalUtilizationCOL: cOpt,
-      reserveFactorBpsCOL: cRes,
-    };
-  } catch {
-    return null;
-  }
 }
 
 export async function flashLoan(receiverAddress, asset, amountWei, params) {
