@@ -10,8 +10,6 @@ export const POOL_ABI = [
   'function depositBUSD(uint256 amount)',
   'function withdrawCOL(uint256 amount)',
   'function withdrawBUSD(uint256 amount)',
-  'function injectCOL(uint256 amount)',
-  'function injectBUSD(uint256 amount)',
   'function depositCollateralPCOL(uint256 amount)',
   'function withdrawCollateralPCOL(uint256 amount)',
   'function depositCollateralPBUSD(uint256 amount)',
@@ -34,13 +32,8 @@ export const POOL_ABI = [
   'function getFlashLoanFee(uint256 amount) view returns (uint256)',
   'function getPriceCOLIn8() view returns (uint256)',
   'function getPriceBUSDIn8() view returns (uint256)',
-  'function liquidationThresholdPCOL() view returns (uint256)',
-  'function liquidationThresholdPBUSD() view returns (uint256)',
+  'function liquidationThreshold() view returns (uint256)',
   'function liquidationBonus() view returns (uint256)',
-  'function depositFeeBps() view returns (uint256)',
-  'function getDepositFeeCOL(uint256 amount) view returns (uint256)',
-  'function getDepositFeeBUSD(uint256 amount) view returns (uint256)',
-  'function impactFeeMultiplierBps() view returns (uint256)',
   'function getCurrentDebtBUSD(address user) view returns (uint256)',
   'function getCurrentDebtCOL(address user) view returns (uint256)',
   'function getUtilizationBUSD() view returns (uint256)',
@@ -51,18 +44,6 @@ export const POOL_ABI = [
   'function getBorrowAPYCOL() view returns (uint256)',
   'function getSupplyAPYBUSD() view returns (uint256)',
   'function getSupplyAPYCOL() view returns (uint256)',
-  'function baseRatePerBlockBUSD() view returns (uint256)',
-  'function slope1PerBlockBUSD() view returns (uint256)',
-  'function slope2PerBlockBUSD() view returns (uint256)',
-  'function optimalUtilizationBUSD() view returns (uint256)',
-  'function reserveFactorBpsBUSD() view returns (uint256)',
-  'function baseRatePerBlockCOL() view returns (uint256)',
-  'function slope1PerBlockCOL() view returns (uint256)',
-  'function slope2PerBlockCOL() view returns (uint256)',
-  'function optimalUtilizationCOL() view returns (uint256)',
-  'function reserveFactorBpsCOL() view returns (uint256)',
-  'event DepositCollateralPCOL(address indexed user, uint256 amount)',
-  'event DepositCollateralPBUSD(address indexed user, uint256 amount)',
 ];
 
 export const FLASH_RECEIVER_ABI = [
@@ -77,10 +58,4 @@ export const ERC20_ABI = [
   'function approve(address spender, uint256 amount) returns (bool)',
   'function allowance(address owner, address spender) view returns (uint256)',
   'function mint(uint256 amount)',
-  'function mint(address to, uint256 amount)',
-];
-
-/** MockERC20 两参数 mint，单独使用以避免与 mint(uint256) 重载歧义 (ethers v6 INVALID_ARGUMENT). */
-export const MOCK_ERC20_MINT_ABI = [
-  'function mint(address to, uint256 amount)',
 ];

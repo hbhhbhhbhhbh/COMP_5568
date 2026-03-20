@@ -44,7 +44,7 @@ export default function Borrow() {
   const [healthFactor, setHealthFactor] = useState(null);
   const [priceCOL, setPriceCOL] = useState(0n);
   const [priceBUSD, setPriceBUSD] = useState(0n);
-  const [poolParams, setPoolParams] = useState({ liquidationThresholdPCOL: 6500n, liquidationThresholdPBUSD: 8500n, liquidationBonus: 1000n });
+  const [poolParams, setPoolParams] = useState({ liquidationThreshold: 8000n, liquidationBonus: 1000n });
   const [dec, setDec] = useState(18);
   const [tx, setTx] = useState({ status: '', hash: '' });
   const [loading, setLoading] = useState(false);
@@ -122,9 +122,7 @@ export default function Borrow() {
   const colLabel = mode === 'PCOL' ? 'PCOL' : 'PBUSD';
   const priceColUsd = priceCOL > 0n ? Number(priceCOL) / 1e8 : 0;
   const priceBusdUsd = priceBUSD > 0n ? Number(priceBUSD) / 1e8 : 1;
-  const ltPCOL = Number(poolParams.liquidationThresholdPCOL ?? 6500n) / 100;
-  const ltPBUSD = Number(poolParams.liquidationThresholdPBUSD ?? 8500n) / 100;
-  const lt = mode === 'PCOL' ? ltPCOL : ltPBUSD;
+  const lt = Number(poolParams.liquidationThreshold ?? 8000n) / 100;
   const lb = Number(poolParams.liquidationBonus ?? 1000n) / 100;
   const MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935n;
   const hfNum = healthFactor != null && healthFactor < MAX_UINT
@@ -140,15 +138,15 @@ export default function Borrow() {
       {!user && <p className="muted">Connect MetaMask first.</p>}
       {user && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Pool Prices</h3>
+          <h3 style={{ marginTop: 0 }}>价格 (池内)</h3>
           <p><strong>COL:</strong> ${priceColUsd.toFixed(4)} &nbsp; <strong>BUSD:</strong> ${priceBusdUsd.toFixed(4)}</p>
-          <h3>Parameters</h3>
-          <p><strong>Liquidation Threshold:</strong> PCOL-&gt;BUSD {ltPCOL}% &nbsp; PBUSD-&gt;COL {ltPBUSD}% &nbsp; <strong>Liquidation Bonus:</strong> {lb}%</p>
-          <h3>Current Position</h3>
-          <p><strong>Held {colLabel}:</strong> {fmt(balance, dec)} &nbsp; <strong>Locked:</strong> {fmt(position.col, dec)} &nbsp; <strong>Debt {borrowAsset}:</strong> {fmt(position.debt, dec)}</p>
-          <p><strong>Collateral Value (USD):</strong> ${colValueUsd.toFixed(2)} &nbsp; <strong>Debt Value (USD):</strong> ${debtValueUsd.toFixed(2)}</p>
-          <p><strong>Health Factor:</strong> {hfNum != null ? hfNum.toFixed(2) : '—'} {hfNum != null && hfNum < 1 && <span className="danger">(liquidatable)</span>}</p>
-          <p><strong>Max Borrowable {borrowAsset}:</strong> {fmt(maxBorrow, dec)}</p>
+          <h3>参数</h3>
+          <p><strong>清算阈值:</strong> {lt}% &nbsp; <strong>清算奖励:</strong> {lb}%</p>
+          <h3>当前仓位</h3>
+          <p><strong>持有 {colLabel}:</strong> {fmt(balance, dec)} &nbsp; <strong>已锁定:</strong> {fmt(position.col, dec)} &nbsp; <strong>债务 {borrowAsset}:</strong> {fmt(position.debt, dec)}</p>
+          <p><strong>抵押价值 (USD):</strong> ${colValueUsd.toFixed(2)} &nbsp; <strong>债务价值 (USD):</strong> ${debtValueUsd.toFixed(2)}</p>
+          <p><strong>健康系数:</strong> {hfNum != null ? hfNum.toFixed(2) : '—'} {hfNum != null && hfNum < 1 && <span className="danger">(可清算)</span>}</p>
+          <p><strong>抵押物最高可借 {borrowAsset}:</strong> {fmt(maxBorrow, dec)}</p>
           <div className="form-group">
             <label>Mode</label>
             <select value={mode} onChange={(e) => setMode(e.target.value)} style={{ maxWidth: 320, padding: '0.6rem 0.75rem', borderRadius: 8 }}>
@@ -167,14 +165,7 @@ export default function Borrow() {
           <form onSubmit={handleSubmit}>
             <div className="form-group">
               <label>Amount</label>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <input type="text" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" style={{ flex: '1 1 200px' }} />
-                {action === 'borrow' && (
-                  <button type="button" className="submit-btn" style={{ marginBottom: 0 }} onClick={() => setAmount(fmt(maxBorrow, dec))}>
-                    Max
-                  </button>
-                )}
-              </div>
+              <input type="text" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" />
             </div>
             <button type="submit" className="submit-btn" disabled={loading || !amount}>
               {loading ? '...' : action === 'borrow' ? 'Borrow ' + borrowAsset : action === 'deposit' ? 'Lock ' + colLabel : 'Unlock ' + colLabel}

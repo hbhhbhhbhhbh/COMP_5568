@@ -65,7 +65,7 @@ export default function Withdraw() {
   }, [user, pToken]);
 
   const locked = mode === 'COL' ? posPCOL.collateralPCOL : posPBUSD.collateralPBUSD;
-  const withdrawable = pBalance;
+  const withdrawable = pBalance; // 未锁定的 P 币可提取
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -74,7 +74,7 @@ export default function Withdraw() {
     setTx({ status: '', hash: '' });
     try {
       const amountWei = ethers.parseUnits(amount, decimals);
-      if (amountWei > withdrawable) throw new Error('Insufficient withdrawable balance (unlock collateral first)');
+      if (amountWei > withdrawable) throw new Error('可提取余额不足（先解除抵押）');
       const receipt = mode === 'COL' ? await withdrawCOL(amountWei) : await withdrawBUSD(amountWei);
       setTx({ status: 'success', hash: receipt.hash });
       setAmount('');
@@ -89,38 +89,38 @@ export default function Withdraw() {
 
   return (
     <div className="page">
-      <h1>Withdraw</h1>
-      <p className="muted">Redeem COL with PCOL 1:1, or redeem BUSD with PBUSD 1:1. Only unlocked P tokens are withdrawable.</p>
-      {!user && <p className="muted">Please connect MetaMask first.</p>}
+      <h1>Withdraw 取回</h1>
+      <p className="muted">用 PCOL 1:1 取回 COL，用 PBUSD 1:1 取回 BUSD。仅未锁定的 P 币可提取。</p>
+      {!user && <p className="muted">请先连接 MetaMask。</p>}
       {user && (
         <div className="card">
           <div className="form-group">
-            <label>Asset to Withdraw</label>
+            <label>取回资产</label>
             <select
               value={mode}
               onChange={(e) => setMode(e.target.value)}
               style={{ maxWidth: 320, padding: '0.6rem 0.75rem', borderRadius: 8 }}
             >
-              <option value="COL">PCOL -> Withdraw COL</option>
-              <option value="BUSD">PBUSD -> Withdraw BUSD</option>
+              <option value="COL">PCOL → 取回 COL</option>
+              <option value="BUSD">PBUSD → 取回 BUSD</option>
             </select>
           </div>
-          <p><strong>Withdrawable {pSymbol}:</strong> {formatWei(withdrawable, decimals)}</p>
+          <p><strong>可提取 {pSymbol}:</strong> {formatWei(withdrawable, decimals)}</p>
           {locked > 0n && (
-            <p className="muted">Locked as collateral: {formatWei(locked, decimals)}. Unlock it first on the Borrow page.</p>
+            <p className="muted">已锁定（抵押中）: {formatWei(locked, decimals)}。需在 Borrow 页先解除抵押。</p>
           )}
           <form onSubmit={handleSubmit}>
             <div className="form-group">
-              <label>Amount</label>
+              <label>数量</label>
               <input type="text" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" />
             </div>
             <button type="submit" className="submit-btn" disabled={loading || !amount}>
-              {loading ? 'Withdrawing...' : `Withdraw ${mode === 'COL' ? 'COL' : 'BUSD'}`}
+              {loading ? '取回中...' : `取回 ${mode === 'COL' ? 'COL' : 'BUSD'}`}
             </button>
           </form>
           {tx.status && (
             <p className={tx.status === 'success' ? 'success' : 'danger'} style={{ marginTop: '1rem' }}>
-              {tx.status === 'success' ? `Success. Tx: ${tx.hash}` : tx.hash}
+              {tx.status === 'success' ? `成功。Tx: ${tx.hash}` : tx.hash}
             </p>
           )}
         </div>
