@@ -35,15 +35,27 @@ contract PCOLBUSDPool is ReentrancyGuard {
     uint256 public totalScaledDebtBUSD;
     uint256 public totalScaledDebtCOL;
 
-    uint256 public baseRatePerBlockBUSD = 1e15;
-    uint256 public multiplierPerBlockBUSD = 5e16;
+    /// @dev 拐点利率模型 (Kinked): u <= U_opt 时 rate = base + slope1*u；u > U_opt 时 rate = rateAtOpt + slope2*(u - U_opt)
+    ///      BUSD 稳定币：U_opt 约 85%；COL 波动资产：U_opt 约 55%
+    uint256 public baseRatePerBlockBUSD = 1e10;
+    uint256 public slope1PerBlockBUSD = 1e11;
+    uint256 public slope2PerBlockBUSD = 2e12;
+    uint256 public optimalUtilizationBUSD = 85e16; // 85%, 1e18
+    uint256 public baseRatePerBlockCOL = 1e10;
+    uint256 public slope1PerBlockCOL = 2e11;
+    uint256 public slope2PerBlockCOL = 3e12;
+    uint256 public optimalUtilizationCOL = 55e16; // 55%, 1e18
     uint256 public reserveFactorBpsBUSD = 1000;
-    uint256 public baseRatePerBlockCOL = 1e15;
-    uint256 public multiplierPerBlockCOL = 5e16;
     uint256 public reserveFactorBpsCOL = 1000;
-    uint256 public liquidationThreshold = 8000;
+    /// @dev 清算阈值 bps：PCOL 抵押借 BUSD 用较低阈值(65%)，PBUSD 抵押借 COL 用较高(85%)
+    uint256 public liquidationThresholdPCOL = 6500;
+    uint256 public liquidationThresholdPBUSD = 8500;
     uint256 public liquidationBonus = 1000;
     uint256 public flashLoanFeeBps = 9;
+    /// @dev 存款管理费：池为空时用此固定费率（bps）
+    uint256 public depositFeeBps = 5;
+    /// @dev 次线性收费倍数（影响^0.25）：impact 1% 时约收 0.005%，impactFeeMultiplierBps=2。fee = amount * impact^0.25 * impactFeeMultiplierBps / BPS
+    uint256 public impactFeeMultiplierBps = 10;
     uint256 public rewardPerDeposit = 1e18;
     uint256 public rewardPerBorrow = 1e17;
 
@@ -66,6 +78,8 @@ contract PCOLBUSDPool is ReentrancyGuard {
     event LiquidateBUSD(address indexed liquidator, address indexed user, uint256 debtRepaid, uint256 pcolReceived);
     event LiquidateCOL(address indexed liquidator, address indexed user, uint256 debtRepaid, uint256 pbusdReceived);
     event FlashLoan(address indexed receiver, address indexed asset, uint256 amount, uint256 fee);
+    event InjectCOL(address indexed from_, uint256 amount);
+    event InjectBUSD(address indexed from_, uint256 amount);
 
     constructor(address _tokenCOL, address _tokenBUSD, address _governanceToken) {
         require(_tokenCOL != address(0) && _tokenBUSD != address(0) && _governanceToken != address(0), "PCOLBUSDPool: zero");
@@ -84,6 +98,7 @@ contract PCOLBUSDPool is ReentrancyGuard {
         rBUSD = IERC20(tokenBUSD).balanceOf(address(this));
     }
 
+    /// @dev 池内 1 COL 的 USD 价格，8 位小数（与 BUSD 1:1 一致）
     function _priceCOLIn8() internal view returns (uint256) {
         (uint256 rCOL, uint256 rBUSD) = _getReserves();
         if (rCOL == 0) return 0;
@@ -92,16 +107,23 @@ contract PCOLBUSDPool is ReentrancyGuard {
         return (rBUSD * 10 ** (PRICE_DECIMALS + dCOL)) / (rCOL * 10 ** dBUSD);
     }
 
+    /// @dev BUSD 固定 1 USD，8 位小数
     function _priceBUSDIn8() internal pure returns (uint256) {
         return 1e8;
     }
 
+    /// @dev 拐点模型：u <= U_opt 时 rate = base + slope1*u；u > U_opt 时 rate = rateAtOpt + slope2*(u - U_opt)
     function _getRatePerBlockBUSDWithIndex(uint256 idx) internal view returns (uint256) {
         uint256 poolBUSD = IERC20(tokenBUSD).balanceOf(address(this));
         uint256 totalDebt = (totalScaledDebtBUSD * idx) / 1e18;
         uint256 denom = poolBUSD + totalDebt;
         uint256 u = denom == 0 ? 0 : (totalDebt * 1e18) / denom;
-        return baseRatePerBlockBUSD + (multiplierPerBlockBUSD * u) / 1e18;
+        uint256 U_opt = optimalUtilizationBUSD;
+        if (u <= U_opt) {
+            return baseRatePerBlockBUSD + (slope1PerBlockBUSD * u) / 1e18;
+        }
+        uint256 rateAtOpt = baseRatePerBlockBUSD + (slope1PerBlockBUSD * U_opt) / 1e18;
+        return rateAtOpt + (slope2PerBlockBUSD * (u - U_opt)) / 1e18;
     }
 
     function _getRatePerBlockCOLWithIndex(uint256 idx) internal view returns (uint256) {
@@ -109,7 +131,12 @@ contract PCOLBUSDPool is ReentrancyGuard {
         uint256 totalDebt = (totalScaledDebtCOL * idx) / 1e18;
         uint256 denom = poolCOL + totalDebt;
         uint256 u = denom == 0 ? 0 : (totalDebt * 1e18) / denom;
-        return baseRatePerBlockCOL + (multiplierPerBlockCOL * u) / 1e18;
+        uint256 U_opt = optimalUtilizationCOL;
+        if (u <= U_opt) {
+            return baseRatePerBlockCOL + (slope1PerBlockCOL * u) / 1e18;
+        }
+        uint256 rateAtOpt = baseRatePerBlockCOL + (slope1PerBlockCOL * U_opt) / 1e18;
+        return rateAtOpt + (slope2PerBlockCOL * (u - U_opt)) / 1e18;
     }
 
     function _accrueBUSD() internal {
@@ -204,15 +231,26 @@ contract PCOLBUSDPool is ReentrancyGuard {
 
     function getBorrowRatePerBlockBUSD() public view returns (uint256) {
         uint256 u = getUtilizationBUSD();
-        return baseRatePerBlockBUSD + (multiplierPerBlockBUSD * u) / 1e18;
+        uint256 U_opt = optimalUtilizationBUSD;
+        if (u <= U_opt) {
+            return baseRatePerBlockBUSD + (slope1PerBlockBUSD * u) / 1e18;
+        }
+        uint256 rateAtOpt = baseRatePerBlockBUSD + (slope1PerBlockBUSD * U_opt) / 1e18;
+        return rateAtOpt + (slope2PerBlockBUSD * (u - U_opt)) / 1e18;
     }
 
     function getBorrowRatePerBlockCOL() public view returns (uint256) {
         uint256 u = getUtilizationCOL();
-        return baseRatePerBlockCOL + (multiplierPerBlockCOL * u) / 1e18;
+        uint256 U_opt = optimalUtilizationCOL;
+        if (u <= U_opt) {
+            return baseRatePerBlockCOL + (slope1PerBlockCOL * u) / 1e18;
+        }
+        uint256 rateAtOpt = baseRatePerBlockCOL + (slope1PerBlockCOL * U_opt) / 1e18;
+        return rateAtOpt + (slope2PerBlockCOL * (u - U_opt)) / 1e18;
     }
 
-    /// @dev APY in 1e18 (e.g. 0.1e18 = 10%). Simple: ratePerBlock * BLOCKS_PER_YEAR.
+    /// @dev APY 单利年化，合约返回值满足 (apyWei/1e18)*100 = 显示的百分比。例如 0.1e18 → 10%。
+    ///      ratePerBlock 为每 block 利率(1e18)，一年 BLOCKS_PER_YEAR 块，故 APY = ratePerBlock * BLOCKS_PER_YEAR。
     function getBorrowAPYBUSD() public view returns (uint256) {
         return getBorrowRatePerBlockBUSD() * BLOCKS_PER_YEAR;
     }
@@ -221,6 +259,7 @@ contract PCOLBUSDPool is ReentrancyGuard {
         return getBorrowRatePerBlockCOL() * BLOCKS_PER_YEAR;
     }
 
+    /// @dev Supply APY = borrow APY * utilization * (1 - reserveFactor). In 1e18.
     function getSupplyAPYBUSD() public view returns (uint256) {
         uint256 u = getUtilizationBUSD();
         uint256 borrowAPY = getBorrowAPYBUSD();
@@ -233,20 +272,57 @@ contract PCOLBUSDPool is ReentrancyGuard {
         return (borrowAPY * u * (BPS - reserveFactorBpsCOL)) / (BPS * 1e18);
     }
 
+    /// @dev 存入 COL 对价格的影响：池 COL 增加，COL 价格下降。impact = amount/(poolCOL+amount)。按影响收费：影响 1% 收存入量 0.05%（20 倍），费留池内。
     function depositCOL(uint256 amount) external nonReentrant {
         require(amount > 0, "PCOLBUSDPool: zero");
         IERC20(tokenCOL).safeTransferFrom(msg.sender, address(this), amount);
-        pcolToken.mint(msg.sender, amount);
+        uint256 poolCOLNow = IERC20(tokenCOL).balanceOf(address(this));
+        uint256 fee = _depositFeeByImpact(amount, poolCOLNow);
+        uint256 toMint = amount - fee;
+        pcolToken.mint(msg.sender, toMint);
         if (rewardPerDeposit > 0) governanceToken.mintReward(msg.sender, rewardPerDeposit);
-        emit DepositCOL(msg.sender, amount, amount);
+        emit DepositCOL(msg.sender, amount, toMint);
     }
 
+    /// @dev 存入 BUSD 对价格的影响：池 BUSD 增加，COL 价格上升（以 BUSD 计即 BUSD 相对贬值）。impact = amount/(poolBUSD+amount)。按影响收费，费留池内。
     function depositBUSD(uint256 amount) external nonReentrant {
         require(amount > 0, "PCOLBUSDPool: zero");
         IERC20(tokenBUSD).safeTransferFrom(msg.sender, address(this), amount);
-        pbusdToken.mint(msg.sender, amount);
+        uint256 poolBUSDNow = IERC20(tokenBUSD).balanceOf(address(this));
+        uint256 fee = _depositFeeByImpact(amount, poolBUSDNow);
+        uint256 toMint = amount - fee;
+        pbusdToken.mint(msg.sender, toMint);
         if (rewardPerDeposit > 0) governanceToken.mintReward(msg.sender, rewardPerDeposit);
-        emit DepositBUSD(msg.sender, amount, amount);
+        emit DepositBUSD(msg.sender, amount, toMint);
+    }
+
+    /// @dev 次线性：impact = amount/(poolReserve+amount)，fee = amount * impact^0.25 * impactFeeMultiplierBps / BPS。池为空时用固定 depositFeeBps。
+    function _depositFeeByImpact(uint256 amount, uint256 poolReserveAfterDeposit) internal view returns (uint256 fee) {
+        uint256 poolBefore = poolReserveAfterDeposit - amount;
+        if (poolBefore == 0) return (amount * depositFeeBps) / BPS;
+        uint256 sum = poolReserveAfterDeposit;
+        uint256 impact18 = (amount * 1e18) / sum;
+        uint256 impact025 = _impactPow025(impact18);
+        fee = (amount * impact025 * impactFeeMultiplierBps) / (1e18 * BPS);
+        if (fee > amount) fee = amount;
+    }
+
+    /// @dev impact^0.25 in 1e18 scale. impact18 in 1e18 (0..1e18). s2 = sqrt(sqrt(impact18)*1e9) = impact^0.25 * 1e9, so impact025_18 = s2 * 1e9.
+    function _impactPow025(uint256 impact18) internal pure returns (uint256) {
+        if (impact18 == 0) return 0;
+        uint256 s1 = _sqrt(impact18);
+        uint256 s2 = _sqrt(s1 * 1e9);
+        return s2 * 1e9;
+    }
+
+    function _sqrt(uint256 x) internal pure returns (uint256 y) {
+        if (x == 0) return 0;
+        uint256 z = (x + 1) / 2;
+        y = x;
+        while (z < y) {
+            y = z;
+            z = (x / z + z) / 2;
+        }
     }
 
     function withdrawCOL(uint256 amount) external nonReentrant {
@@ -294,7 +370,7 @@ contract PCOLBUSDPool is ReentrancyGuard {
         uint256 debtValue8 = d * _priceBUSDIn8();
         uint256 colValue8 = _collateralValuePCOLIn8(user);
         if (debtValue8 == 0) return type(uint256).max;
-        return (colValue8 * liquidationThreshold * 1e18) / (debtValue8 * BPS);
+        return (colValue8 * liquidationThresholdPCOL * 1e18) / (debtValue8 * BPS);
     }
 
     function borrowBUSD(uint256 amount) external nonReentrant {
@@ -306,6 +382,7 @@ contract PCOLBUSDPool is ReentrancyGuard {
         scaledDebtBUSD[msg.sender] += scaled;
         totalScaledDebtBUSD += scaled;
         require(getHealthFactorPCOL(msg.sender) >= 1e18, "PCOLBUSDPool: HF");
+        // 借出的 BUSD 转给用户，离开池子
         IERC20(tokenBUSD).safeTransfer(msg.sender, amount);
         if (rewardPerBorrow > 0) governanceToken.mintReward(msg.sender, rewardPerBorrow);
         emit BorrowBUSD(msg.sender, amount);
@@ -370,7 +447,7 @@ contract PCOLBUSDPool is ReentrancyGuard {
         uint256 debtValue8 = d * _priceCOLIn8();
         uint256 colValue8 = _collateralValuePBUSDIn8(user);
         if (debtValue8 == 0) return type(uint256).max;
-        return (colValue8 * liquidationThreshold * 1e18) / (debtValue8 * BPS);
+        return (colValue8 * liquidationThresholdPBUSD * 1e18) / (debtValue8 * BPS);
     }
 
     function borrowCOL(uint256 amount) external nonReentrant {
@@ -382,6 +459,7 @@ contract PCOLBUSDPool is ReentrancyGuard {
         scaledDebtCOL[msg.sender] += scaled;
         totalScaledDebtCOL += scaled;
         require(getHealthFactorPBUSD(msg.sender) >= 1e18, "PCOLBUSDPool: HF");
+        // 借出的 COL 转给用户，离开池子
         IERC20(tokenCOL).safeTransfer(msg.sender, amount);
         if (rewardPerBorrow > 0) governanceToken.mintReward(msg.sender, rewardPerBorrow);
         emit BorrowCOL(msg.sender, amount);
@@ -432,6 +510,20 @@ contract PCOLBUSDPool is ReentrancyGuard {
         emit FlashLoan(receiverAddress, asset, amount, fee);
     }
 
+    /// @dev 测试用：向池内注入 COL，不铸造 PCOL，用于调节池储备从而改变 COL 价格（测试清算等）
+    function injectCOL(uint256 amount) external nonReentrant {
+        if (amount == 0) return;
+        IERC20(tokenCOL).safeTransferFrom(msg.sender, address(this), amount);
+        emit InjectCOL(msg.sender, amount);
+    }
+
+    /// @dev 测试用：向池内注入 BUSD，不铸造 PBUSD，用于调节池储备从而改变 COL 价格（测试清算等）
+    function injectBUSD(uint256 amount) external nonReentrant {
+        if (amount == 0) return;
+        IERC20(tokenBUSD).safeTransferFrom(msg.sender, address(this), amount);
+        emit InjectBUSD(msg.sender, amount);
+    }
+
     function getUserPositionPCOL(address user) external view returns (uint256 collateralPCOL, uint256 debtBUSD_) {
         return (lockedPCOL[user], getCurrentDebtBUSD(user));
     }
@@ -440,26 +532,101 @@ contract PCOLBUSDPool is ReentrancyGuard {
         return (lockedPBUSD[user], getCurrentDebtCOL(user));
     }
 
-    function getMaxBorrowBUSD(address user) external view returns (uint256) {
-        if (lockedPCOL[user] == 0) return 0;
-        uint256 colValue8 = _collateralValuePCOLIn8(user);
-        uint256 debtValue8 = getCurrentDebtBUSD(user) * _priceBUSDIn8();
-        uint256 maxDebtValue8 = (colValue8 * liquidationThreshold) / BPS;
-        if (maxDebtValue8 <= debtValue8) return 0;
-        uint256 maxAdditional = (maxDebtValue8 - debtValue8) / _priceBUSDIn8();
-        uint256 available = IERC20(tokenBUSD).balanceOf(address(this));
-        return maxAdditional > available ? available : maxAdditional;
+    /// @dev 假设池子 BUSD=rBUSD、COL=rCOL 时，1 COL 价格（8 位小数），与 _priceCOLIn8 同一套整数舍入
+    function _priceCOLIn8Hypothetical(uint256 rBUSD, uint256 rCOL) internal view returns (uint256) {
+        if (rCOL == 0) return 0;
+        uint8 dCOL = IERC20Metadata(tokenCOL).decimals();
+        uint8 dBUSD = IERC20Metadata(tokenBUSD).decimals();
+        return (rBUSD * 10 ** (PRICE_DECIMALS + dCOL)) / (rCOL * 10 ** dBUSD);
     }
 
+    /// @dev 假设用户再借 addBorrowBUSD 后，用与 getHealthFactorPCOL 相同的整数运算得到的 HF（1e18）
+    function _getHealthFactorPCOLAfterBorrowBUSD(address user, uint256 addBorrowBUSD) internal view returns (uint256) {
+        uint256 L = lockedPCOL[user];
+        if (L == 0) return 0;
+        uint256 P = IERC20(tokenBUSD).balanceOf(address(this));
+        uint256 Q = IERC20(tokenCOL).balanceOf(address(this));
+        if (Q == 0 || addBorrowBUSD > P) return 0;
+        uint256 debtAfter = getCurrentDebtBUSD(user) + addBorrowBUSD;
+        if (debtAfter == 0) return type(uint256).max;
+        uint256 poolBUSDAfter = P - addBorrowBUSD;
+        uint256 colValue8 = L * _priceCOLIn8Hypothetical(poolBUSDAfter, Q);
+        uint256 debtValue8 = debtAfter * _priceBUSDIn8();
+        if (debtValue8 == 0) return type(uint256).max;
+        return (colValue8 * liquidationThresholdPCOL * 1e18) / (debtValue8 * BPS);
+    }
+
+    /// @dev 假设用户再借 addBorrowCOL 后，用与 getHealthFactorPBUSD 相同的整数运算得到的 HF（1e18）
+    function _getHealthFactorPBUSDAfterBorrowCOL(address user, uint256 addBorrowCOL) internal view returns (uint256) {
+        uint256 L = lockedPBUSD[user];
+        if (L == 0) return 0;
+        uint256 P = IERC20(tokenBUSD).balanceOf(address(this));
+        uint256 Q = IERC20(tokenCOL).balanceOf(address(this));
+        if (P == 0 || addBorrowCOL > Q) return 0;
+        uint256 debtAfter = getCurrentDebtCOL(user) + addBorrowCOL;
+        if (debtAfter == 0) return type(uint256).max;
+        uint256 poolCOLAfter = Q - addBorrowCOL;
+        uint256 priceCOLAfter = _priceCOLIn8Hypothetical(P, poolCOLAfter);
+        uint256 colValue8 = L * _priceBUSDIn8();
+        uint256 debtValue8 = debtAfter * priceCOLAfter;
+        if (debtValue8 == 0) return type(uint256).max;
+        return (colValue8 * liquidationThresholdPBUSD * 1e18) / (debtValue8 * BPS);
+    }
+
+    /// @dev 考虑借款后池子变化与整数舍入：二分查找满足借后 HF >= 1e18 的最大可借 BUSD。
+    function getMaxBorrowBUSD(address user) external view returns (uint256) {
+        uint256 L = lockedPCOL[user];
+        if (L == 0) return 0;
+        uint256 P = IERC20(tokenBUSD).balanceOf(address(this));
+        uint256 Q = IERC20(tokenCOL).balanceOf(address(this));
+        if (Q == 0) return 0;
+        uint256 D = getCurrentDebtBUSD(user);
+        uint256 T = liquidationThresholdPCOL;
+        uint256 num = L * P * T;
+        uint256 denomCol = D * Q * BPS;
+        if (num <= denomCol) return 0;
+        uint256 xUpper = (num - denomCol) / (L * T + Q * BPS);
+        if (xUpper > P) xUpper = P;
+        if (xUpper == 0) return 0;
+        uint256 low = 0;
+        uint256 high = xUpper;
+        while (low < high) {
+            uint256 mid = (low + high + 1) / 2;
+            if (_getHealthFactorPCOLAfterBorrowBUSD(user, mid) >= 1e18) {
+                low = mid;
+            } else {
+                high = mid - 1;
+            }
+        }
+        return low;
+    }
+
+    /// @dev 考虑借款后池子变化与整数舍入：二分查找满足借后 HF >= 1e18 的最大可借 COL。
     function getMaxBorrowCOL(address user) external view returns (uint256) {
-        if (lockedPBUSD[user] == 0) return 0;
-        uint256 colValue8 = _collateralValuePBUSDIn8(user);
-        uint256 debtValue8 = getCurrentDebtCOL(user) * _priceCOLIn8();
-        uint256 maxDebtValue8 = (colValue8 * liquidationThreshold) / BPS;
-        if (maxDebtValue8 <= debtValue8) return 0;
-        uint256 maxAdditional = (maxDebtValue8 - debtValue8) / _priceCOLIn8();
-        uint256 available = IERC20(tokenCOL).balanceOf(address(this));
-        return maxAdditional > available ? available : maxAdditional;
+        uint256 L = lockedPBUSD[user];
+        if (L == 0) return 0;
+        uint256 P = IERC20(tokenBUSD).balanceOf(address(this));
+        uint256 Q = IERC20(tokenCOL).balanceOf(address(this));
+        if (P == 0) return 0;
+        uint256 D = getCurrentDebtCOL(user);
+        uint256 T = liquidationThresholdPBUSD;
+        uint256 num = L * T * Q;
+        uint256 denomCol = D * P * BPS;
+        if (num <= denomCol) return 0;
+        uint256 xUpper = (num - denomCol) / (L * T + P * BPS);
+        if (xUpper > Q) xUpper = Q;
+        if (xUpper == 0) return 0;
+        uint256 low = 0;
+        uint256 high = xUpper;
+        while (low < high) {
+            uint256 mid = (low + high + 1) / 2;
+            if (_getHealthFactorPBUSDAfterBorrowCOL(user, mid) >= 1e18) {
+                low = mid;
+            } else {
+                high = mid - 1;
+            }
+        }
+        return low;
     }
 
     function isLiquidatablePCOL(address user) external view returns (bool) {
@@ -472,6 +639,18 @@ contract PCOLBUSDPool is ReentrancyGuard {
 
     function getFlashLoanFee(uint256 amount) external view returns (uint256) {
         return (amount * flashLoanFeeBps) / BPS;
+    }
+
+    /// @dev 存入 amount COL 时预计收取的管理费（按价格影响，影响 1% 收 0.05%）
+    function getDepositFeeCOL(uint256 amount) external view returns (uint256) {
+        uint256 poolAfter = IERC20(tokenCOL).balanceOf(address(this)) + amount;
+        return _depositFeeByImpact(amount, poolAfter);
+    }
+
+    /// @dev 存入 amount BUSD 时预计收取的管理费
+    function getDepositFeeBUSD(uint256 amount) external view returns (uint256) {
+        uint256 poolAfter = IERC20(tokenBUSD).balanceOf(address(this)) + amount;
+        return _depositFeeByImpact(amount, poolAfter);
     }
 
     /// @dev COL price in 8 decimals (USD, from pool ratio). For frontend display.
