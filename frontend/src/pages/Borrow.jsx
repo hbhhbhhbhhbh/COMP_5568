@@ -1,93 +1,186 @@
 import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import {
-  getAccount,
   addresses,
-  getUserPosition,
-  getHealthFactor,
   getTokenBalance,
   getTokenInfo,
-  borrow,
+  approveToken,
+  depositCollateralPCOL,
+  depositCollateralPBUSD,
+  withdrawCollateralPCOL,
+  withdrawCollateralPBUSD,
+  borrowBUSD,
+  borrowCOL,
+  getUserPositionPCOL,
+  getUserPositionPBUSD,
+  getMaxBorrowBUSD,
+  getMaxBorrowCOL,
+  getHealthFactorPCOL,
+  getHealthFactorPBUSD,
+  getPriceCOLIn8,
+  getPriceBUSDIn8,
+  getPoolParams,
 } from '../utils/web3';
+import { useWallet } from '../context/WalletContext';
 import './Page.css';
 
-export default function BorrowPage() {
-  const [user, setUser] = useState(null);
+function fmt(wei, d) {
+  if (wei == null) return '0';
+  try {
+    return typeof wei === 'bigint' ? ethers.formatUnits(wei, d ?? 18) : String(wei);
+  } catch {
+    return '0';
+  }
+}
+
+export default function Borrow() {
+  const { user } = useWallet();
+  const [mode, setMode] = useState('PCOL');
+  const [action, setAction] = useState('deposit');
   const [amount, setAmount] = useState('');
-  const [position, setPosition] = useState({ collateral: 0n, debt: 0n });
+  const [balance, setBalance] = useState(0n);
+  const [position, setPosition] = useState({ col: 0n, debt: 0n });
+  const [maxBorrow, setMaxBorrow] = useState(0n);
   const [healthFactor, setHealthFactor] = useState(null);
-  const [decimals, setDecimals] = useState(18);
-  const [symbol, setSymbol] = useState('USD');
+  const [priceCOL, setPriceCOL] = useState(0n);
+  const [priceBUSD, setPriceBUSD] = useState(0n);
+  const [poolParams, setPoolParams] = useState({ liquidationThresholdPCOL: 6500n, liquidationThresholdPBUSD: 8500n, liquidationBonus: 1000n });
+  const [dec, setDec] = useState(18);
   const [tx, setTx] = useState({ status: '', hash: '' });
   const [loading, setLoading] = useState(false);
-
-  const asset = addresses.borrowAsset;
+  const pool = addresses.lendingPool;
+  const pcol = addresses.pcolToken;
+  const pbusd = addresses.pbusdToken;
+  const pToken = mode === 'PCOL' ? pcol : pbusd;
+  const borrowAsset = mode === 'PCOL' ? 'BUSD' : 'COL';
 
   useEffect(() => {
-    getAccount().then(setUser);
-  }, []);
+    if (!pToken) return;
+    getTokenInfo(pToken).then((d) => setDec(d.decimals));
+  }, [pToken]);
 
   useEffect(() => {
-    if (!user || !asset) return;
-    getUserPosition(user).then(setPosition);
-    getHealthFactor(user).then(setHealthFactor);
-    getTokenInfo(asset).then((info) => {
-      setDecimals(info.decimals);
-      setSymbol(info.symbol);
-    });
-  }, [user, asset]);
+    if (!user || !pcol || !pbusd) return;
+    getPriceCOLIn8().then(setPriceCOL);
+    getPriceBUSDIn8().then(setPriceBUSD);
+    getPoolParams().then(setPoolParams);
+    if (mode === 'PCOL') {
+      getUserPositionPCOL(user).then((p) => setPosition({ col: p.collateralPCOL, debt: p.debtBUSD }));
+      getMaxBorrowBUSD(user).then(setMaxBorrow);
+      getHealthFactorPCOL(user).then(setHealthFactor);
+      getTokenBalance(pcol, user).then(setBalance);
+    } else {
+      getUserPositionPBUSD(user).then((p) => setPosition({ col: p.collateralPBUSD, debt: p.debtCOL }));
+      getMaxBorrowCOL(user).then(setMaxBorrow);
+      getHealthFactorPBUSD(user).then(setHealthFactor);
+      getTokenBalance(pbusd, user).then(setBalance);
+    }
+  }, [user, mode, pcol, pbusd]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!amount || !user) return;
+    if (!amount || !user || !pool) return;
     setLoading(true);
     setTx({ status: '', hash: '' });
     try {
-      const amountWei = ethers.parseUnits(amount, decimals);
-      const receipt = await borrow(asset, amountWei);
-      setTx({ status: 'success', hash: receipt.hash });
+      const amountWei = ethers.parseUnits(amount, dec);
+      const { getTokenAllowance } = await import('../utils/web3');
+      if (action === 'deposit') {
+        if (amountWei > balance) throw new Error('Insufficient balance');
+        const allowance = await getTokenAllowance(pToken, user, pool);
+        if (allowance < amountWei) await approveToken(pToken, pool, ethers.MaxUint256);
+        const receipt = mode === 'PCOL' ? await depositCollateralPCOL(amountWei) : await depositCollateralPBUSD(amountWei);
+        setTx({ status: 'success', hash: receipt.hash });
+      } else if (action === 'withdraw') {
+        if (amountWei > position.col) throw new Error('Exceeds locked');
+        const receipt = mode === 'PCOL' ? await withdrawCollateralPCOL(amountWei) : await withdrawCollateralPBUSD(amountWei);
+        setTx({ status: 'success', hash: receipt.hash });
+      } else {
+        if (amountWei > maxBorrow) throw new Error('Exceeds max borrow');
+        const receipt = mode === 'PCOL' ? await borrowBUSD(amountWei) : await borrowCOL(amountWei);
+        setTx({ status: 'success', hash: receipt.hash });
+      }
       setAmount('');
-      const [pos, hf] = await Promise.all([getUserPosition(user), getHealthFactor(user)]);
-      setPosition(pos);
-      setHealthFactor(hf);
+      if (mode === 'PCOL') {
+        getUserPositionPCOL(user).then((p) => setPosition({ col: p.collateralPCOL, debt: p.debtBUSD }));
+        getMaxBorrowBUSD(user).then(setMaxBorrow);
+        getHealthFactorPCOL(user).then(setHealthFactor);
+        getTokenBalance(pcol, user).then(setBalance);
+      } else {
+        getUserPositionPBUSD(user).then((p) => setPosition({ col: p.collateralPBUSD, debt: p.debtCOL }));
+        getMaxBorrowCOL(user).then(setMaxBorrow);
+        getHealthFactorPBUSD(user).then(setHealthFactor);
+        getTokenBalance(pbusd, user).then(setBalance);
+      }
     } catch (err) {
-      setTx({ status: 'error', hash: err.message || 'Transaction failed' });
+      setTx({ status: 'error', hash: err?.message || 'Failed' });
     } finally {
       setLoading(false);
     }
   };
 
-  const hfDisplay = healthFactor != null ? Number(ethers.formatUnits(healthFactor, 18)).toFixed(2) : '—';
+  const colLabel = mode === 'PCOL' ? 'PCOL' : 'PBUSD';
+  const priceColUsd = priceCOL > 0n ? Number(priceCOL) / 1e8 : 0;
+  const priceBusdUsd = priceBUSD > 0n ? Number(priceBUSD) / 1e8 : 1;
+  const ltPCOL = Number(poolParams.liquidationThresholdPCOL ?? 6500n) / 100;
+  const ltPBUSD = Number(poolParams.liquidationThresholdPBUSD ?? 8500n) / 100;
+  const lt = mode === 'PCOL' ? ltPCOL : ltPBUSD;
+  const lb = Number(poolParams.liquidationBonus ?? 1000n) / 100;
+  const MAX_UINT = 115792089237316195423570985008687907853269984665640564039457584007913129639935n;
+  const hfNum = healthFactor != null && healthFactor < MAX_UINT
+    ? Number(healthFactor) / 1e18
+    : null;
+  const colValueUsd = mode === 'PCOL' && priceCOL > 0n ? (Number(position.col) * priceColUsd) / 1e18 : (mode === 'PBUSD' && priceBusdUsd ? (Number(position.col) * priceBusdUsd) / 1e18 : 0);
+  const debtValueUsd = mode === 'PCOL' ? (Number(position.debt) * priceBusdUsd) / 1e18 : (Number(position.debt) * priceColUsd) / 1e18;
 
   return (
     <div className="page">
       <h1>Borrow</h1>
-      <p className="muted">Borrow {symbol} against your collateral. Health factor must stay ≥ 1.</p>
+      <p className="muted">Collateral PCOL to borrow BUSD, or collateral PBUSD to borrow COL.</p>
       {!user && <p className="muted">Connect MetaMask first.</p>}
       {user && (
         <div className="card">
-          <p><strong>Your collateral:</strong> {ethers.formatUnits(position.collateral, 18)} (collateral asset)</p>
-          <p><strong>Current debt:</strong> {ethers.formatUnits(position.debt, decimals)} {symbol}</p>
-          <p><strong>Health factor:</strong> {hfDisplay}</p>
+          <h3 style={{ marginTop: 0 }}>Pool Prices</h3>
+          <p><strong>COL:</strong> ${priceColUsd.toFixed(4)} &nbsp; <strong>BUSD:</strong> ${priceBusdUsd.toFixed(4)}</p>
+          <h3>Parameters</h3>
+          <p><strong>Liquidation Threshold:</strong> PCOL-&gt;BUSD {ltPCOL}% &nbsp; PBUSD-&gt;COL {ltPBUSD}% &nbsp; <strong>Liquidation Bonus:</strong> {lb}%</p>
+          <h3>Current Position</h3>
+          <p><strong>Held {colLabel}:</strong> {fmt(balance, dec)} &nbsp; <strong>Locked:</strong> {fmt(position.col, dec)} &nbsp; <strong>Debt {borrowAsset}:</strong> {fmt(position.debt, dec)}</p>
+          <p><strong>Collateral Value (USD):</strong> ${colValueUsd.toFixed(2)} &nbsp; <strong>Debt Value (USD):</strong> ${debtValueUsd.toFixed(2)}</p>
+          <p><strong>Health Factor:</strong> {hfNum != null ? hfNum.toFixed(2) : '—'} {hfNum != null && hfNum < 1 && <span className="danger">(liquidatable)</span>}</p>
+          <p><strong>Max Borrowable {borrowAsset}:</strong> {fmt(maxBorrow, dec)}</p>
+          <div className="form-group">
+            <label>Mode</label>
+            <select value={mode} onChange={(e) => setMode(e.target.value)} style={{ maxWidth: 320, padding: '0.6rem 0.75rem', borderRadius: 8 }}>
+              <option value="PCOL">Collateral PCOL / Borrow BUSD</option>
+              <option value="PBUSD">Collateral PBUSD / Borrow COL</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Action</label>
+            <select value={action} onChange={(e) => setAction(e.target.value)} style={{ maxWidth: 320, padding: '0.6rem 0.75rem', borderRadius: 8 }}>
+              <option value="deposit">Lock collateral</option>
+              <option value="withdraw">Unlock collateral</option>
+              <option value="borrow">Borrow {borrowAsset}</option>
+            </select>
+          </div>
           <form onSubmit={handleSubmit}>
             <div className="form-group">
-              <label>Amount to borrow ({symbol})</label>
-              <input
-                type="text"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0"
-              />
+              <label>Amount</label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input type="text" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" style={{ flex: '1 1 200px' }} />
+                {action === 'borrow' && (
+                  <button type="button" className="submit-btn" style={{ marginBottom: 0 }} onClick={() => setAmount(fmt(maxBorrow, dec))}>
+                    Max
+                  </button>
+                )}
+              </div>
             </div>
             <button type="submit" className="submit-btn" disabled={loading || !amount}>
-              {loading ? 'Borrowing...' : 'Borrow'}
+              {loading ? '...' : action === 'borrow' ? 'Borrow ' + borrowAsset : action === 'deposit' ? 'Lock ' + colLabel : 'Unlock ' + colLabel}
             </button>
           </form>
-          {tx.status && (
-            <p className={tx.status === 'success' ? 'success' : 'danger'} style={{ marginTop: '1rem' }}>
-              {tx.status === 'success' ? `Done. Tx: ${tx.hash}` : tx.hash}
-            </p>
-          )}
+          {tx.status && <p className={tx.status === 'success' ? 'success' : 'danger'} style={{ marginTop: '1rem' }}>{tx.status === 'success' ? 'Tx: ' + tx.hash : tx.hash}</p>}
         </div>
       )}
     </div>

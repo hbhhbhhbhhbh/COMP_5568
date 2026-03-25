@@ -1,13 +1,15 @@
-import { Outlet } from 'react-router-dom';
 import Header from './Header';
+import ErrorBoundary from './ErrorBoundary';
 import './Layout.css';
 
-export default function Layout() {
+export default function Layout({ children }) {
   return (
     <div className="layout">
       <Header />
       <main className="main">
-        <Outlet />
+        <ErrorBoundary>
+          {children}
+        </ErrorBoundary>
       </main>
     </div>
   );

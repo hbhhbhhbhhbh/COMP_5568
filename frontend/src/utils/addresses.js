@@ -1,27 +1,15 @@
 /**
- * Contract addresses. Update after deployment (Remix or Hardhat).
- * Use env or default to local / Sepolia.
+ * Contract addresses from env (PCOLBUSDPool: 单一池 COL+BUSD，PCOL/PBUSD 凭证).
  */
-const chainId = parseInt(import.meta.env.VITE_CHAIN_ID || '31337', 10);
+const chainId = import.meta.env.VITE_CHAIN_ID || '31337';
 
-// Defaults for Hardhat local (deploy script will output these)
-const LOCAL = {
+export const addresses = {
+  chainId,
   lendingPool: import.meta.env.VITE_LENDING_POOL || '',
-  priceOracle: import.meta.env.VITE_PRICE_ORACLE || '',
   governanceToken: import.meta.env.VITE_GOVERNANCE_TOKEN || '',
-  collateralAsset: import.meta.env.VITE_COLLATERAL_ASSET || '',
-  borrowAsset: import.meta.env.VITE_BORROW_ASSET || '',
+  collateralAsset: import.meta.env.VITE_COLLATERAL_ASSET || '', // COL
+  borrowAsset: import.meta.env.VITE_BORROW_ASSET || '',           // BUSD
+  pcolToken: import.meta.env.VITE_PCOL_TOKEN || '',
+  pbusdToken: import.meta.env.VITE_PBUSD_TOKEN || '',
   flashLoanReceiver: import.meta.env.VITE_FLASH_LOAN_RECEIVER || '',
 };
-
-const SEPOLIA = {
-  lendingPool: import.meta.env.VITE_LENDING_POOL || '',
-  priceOracle: import.meta.env.VITE_PRICE_ORACLE || '',
-  governanceToken: import.meta.env.VITE_GOVERNANCE_TOKEN || '',
-  collateralAsset: import.meta.env.VITE_COLLATERAL_ASSET || '',
-  borrowAsset: import.meta.env.VITE_BORROW_ASSET || '',
-  flashLoanReceiver: import.meta.env.VITE_FLASH_LOAN_RECEIVER || '',
-};
-
-export const addresses = chainId === 11155111 ? SEPOLIA : LOCAL;
-export const isLocal = chainId === 31337;

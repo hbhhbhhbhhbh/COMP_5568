@@ -1,29 +1,73 @@
 /**
- * Minimal ABIs for frontend. Replace with full ABIs from artifacts after compile if needed.
+ * Minimal ABIs for PCOLBUSDPool and ERC20.
  */
-
-export const LENDING_POOL_ABI = [
-  'function deposit(address asset, uint256 amount)',
-  'function withdraw(address asset, uint256 amount)',
-  'function borrow(address asset, uint256 amount)',
-  'function repay(address asset, uint256 amount)',
-  'function liquidate(address collateralAsset, address debtAsset, address user)',
+export const POOL_ABI = [
+  'function tokenCOL() view returns (address)',
+  'function tokenBUSD() view returns (address)',
+  'function pcolToken() view returns (address)',
+  'function pbusdToken() view returns (address)',
+  'function depositCOL(uint256 amount)',
+  'function depositBUSD(uint256 amount)',
+  'function withdrawCOL(uint256 amount)',
+  'function withdrawBUSD(uint256 amount)',
+  'function injectCOL(uint256 amount)',
+  'function injectBUSD(uint256 amount)',
+  'function depositCollateralPCOL(uint256 amount)',
+  'function withdrawCollateralPCOL(uint256 amount)',
+  'function depositCollateralPBUSD(uint256 amount)',
+  'function withdrawCollateralPBUSD(uint256 amount)',
+  'function borrowBUSD(uint256 amount)',
+  'function repayBUSD(uint256 amount)',
+  'function borrowCOL(uint256 amount)',
+  'function repayCOL(uint256 amount)',
+  'function liquidateBUSD(address user)',
+  'function liquidateCOL(address user)',
+  'function getUserPositionPCOL(address user) view returns (uint256 collateralPCOL, uint256 debtBUSD_)',
+  'function getUserPositionPBUSD(address user) view returns (uint256 collateralPBUSD, uint256 debtCOL_)',
+  'function getHealthFactorPCOL(address user) view returns (uint256)',
+  'function getHealthFactorPBUSD(address user) view returns (uint256)',
+  'function getMaxBorrowBUSD(address user) view returns (uint256)',
+  'function getMaxBorrowCOL(address user) view returns (uint256)',
+  'function isLiquidatablePCOL(address user) view returns (bool)',
+  'function isLiquidatablePBUSD(address user) view returns (bool)',
   'function flashLoan(address receiverAddress, address asset, uint256 amount, bytes calldata params)',
-  'function getUserPosition(address user) view returns (uint256 collateral, uint256 debt)',
-  'function getHealthFactor(address user) view returns (uint256)',
-  'function getUtilizationRate() view returns (uint256)',
   'function getFlashLoanFee(uint256 amount) view returns (uint256)',
-  'function isLiquidatable(address user) view returns (bool)',
-  'function collateralAsset() view returns (address)',
-  'function borrowAsset() view returns (address)',
-  'function totalCollateral() view returns (uint256)',
-  'function totalBorrowed() view returns (uint256)',
-  'event Deposit(address indexed user, address indexed asset, uint256 amount)',
-  'event Withdraw(address indexed user, address indexed asset, uint256 amount)',
-  'event Borrow(address indexed user, address indexed asset, uint256 amount)',
-  'event Repay(address indexed user, address indexed asset, uint256 amount)',
-  'event Liquidate(address indexed liquidator, address indexed user, address collateralAsset, address debtAsset, uint256 debtRepaid, uint256 collateralReceived)',
-  'event FlashLoan(address indexed receiver, address indexed asset, uint256 amount, uint256 fee)',
+  'function getPriceCOLIn8() view returns (uint256)',
+  'function getPriceBUSDIn8() view returns (uint256)',
+  'function liquidationThresholdPCOL() view returns (uint256)',
+  'function liquidationThresholdPBUSD() view returns (uint256)',
+  'function liquidationBonus() view returns (uint256)',
+  'function depositFeeBps() view returns (uint256)',
+  'function getDepositFeeCOL(uint256 amount) view returns (uint256)',
+  'function getDepositFeeBUSD(uint256 amount) view returns (uint256)',
+  'function impactFeeMultiplierBps() view returns (uint256)',
+  'function getCurrentDebtBUSD(address user) view returns (uint256)',
+  'function getCurrentDebtCOL(address user) view returns (uint256)',
+  'function getUtilizationBUSD() view returns (uint256)',
+  'function getUtilizationCOL() view returns (uint256)',
+  'function getBorrowRatePerBlockBUSD() view returns (uint256)',
+  'function getBorrowRatePerBlockCOL() view returns (uint256)',
+  'function getBorrowAPYBUSD() view returns (uint256)',
+  'function getBorrowAPYCOL() view returns (uint256)',
+  'function getSupplyAPYBUSD() view returns (uint256)',
+  'function getSupplyAPYCOL() view returns (uint256)',
+  'function baseRatePerBlockBUSD() view returns (uint256)',
+  'function slope1PerBlockBUSD() view returns (uint256)',
+  'function slope2PerBlockBUSD() view returns (uint256)',
+  'function optimalUtilizationBUSD() view returns (uint256)',
+  'function reserveFactorBpsBUSD() view returns (uint256)',
+  'function baseRatePerBlockCOL() view returns (uint256)',
+  'function slope1PerBlockCOL() view returns (uint256)',
+  'function slope2PerBlockCOL() view returns (uint256)',
+  'function optimalUtilizationCOL() view returns (uint256)',
+  'function reserveFactorBpsCOL() view returns (uint256)',
+  'event DepositCollateralPCOL(address indexed user, uint256 amount)',
+  'event DepositCollateralPBUSD(address indexed user, uint256 amount)',
+];
+
+export const FLASH_RECEIVER_ABI = [
+  'function requestFlashLoan(address asset, uint256 amount)',
+  'function lendingPool() view returns (address)',
 ];
 
 export const ERC20_ABI = [
@@ -32,18 +76,11 @@ export const ERC20_ABI = [
   'function symbol() view returns (string)',
   'function approve(address spender, uint256 amount) returns (bool)',
   'function allowance(address owner, address spender) view returns (uint256)',
-  'function transfer(address to, uint256 amount) returns (bool)',
-  'function transferFrom(address from, address to, uint256 amount) returns (bool)',
+  'function mint(uint256 amount)',
+  'function mint(address to, uint256 amount)',
 ];
 
-export const PRICE_ORACLE_ABI = [
-  'function getPrice(address asset) view returns (uint256)',
-  'function setPriceFeed(address asset, address feed)',
-  'function setFallbackPrice(address asset, uint256 price)',
-];
-
-export const GOVERNANCE_TOKEN_ABI = [
-  'function balanceOf(address) view returns (uint256)',
-  'function symbol() view returns (string)',
-  'function rewardRatePerSecond() view returns (uint256)',
+/** MockERC20 两参数 mint，单独使用以避免与 mint(uint256) 重载歧义 (ethers v6 INVALID_ARGUMENT). */
+export const MOCK_ERC20_MINT_ABI = [
+  'function mint(address to, uint256 amount)',
 ];

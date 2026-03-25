@@ -1,72 +1,73 @@
 import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import {
-  getAccount,
   addresses,
-  getUserPosition,
   getTokenBalance,
   getTokenInfo,
-  getTokenAllowance,
   approveToken,
-  repay,
+  repayBUSD,
+  repayCOL,
+  getUserPositionPCOL,
+  getUserPositionPBUSD,
 } from '../utils/web3';
+import { useWallet } from '../context/WalletContext';
 import './Page.css';
 
-export default function RepayPage() {
-  const [user, setUser] = useState(null);
+function fmt(wei, d = 18) {
+  if (wei == null) return '0';
+  try {
+    return typeof wei === 'bigint' ? ethers.formatUnits(wei, d) : String(wei);
+  } catch {
+    return '0';
+  }
+}
+
+export default function Repay() {
+  const { user } = useWallet();
+  const [mode, setMode] = useState('BUSD');
   const [amount, setAmount] = useState('');
-  const [position, setPosition] = useState({ collateral: 0n, debt: 0n });
+  const [debt, setDebt] = useState(0n);
   const [balance, setBalance] = useState(0n);
-  const [decimals, setDecimals] = useState(18);
-  const [symbol, setSymbol] = useState('USD');
+  const [dec, setDec] = useState(18);
+  const [symbol, setSymbol] = useState('BUSD');
   const [tx, setTx] = useState({ status: '', hash: '' });
   const [loading, setLoading] = useState(false);
+  const pool = addresses.lendingPool;
+  const col = addresses.collateralAsset;
+  const busd = addresses.borrowAsset;
+  const asset = mode === 'BUSD' ? busd : col;
 
-  const asset = addresses.borrowAsset;
+  useEffect(() => {
+    if (!asset) return;
+    getTokenInfo(asset).then((d) => { setDec(d.decimals); setSymbol(d.symbol); });
+  }, [asset]);
 
-  const refresh = () => {
+  useEffect(() => {
     if (!user || !asset) return;
-    getUserPosition(user).then(setPosition);
+    if (mode === 'BUSD') getUserPositionPCOL(user).then((p) => setDebt(p.debtBUSD));
+    else getUserPositionPBUSD(user).then((p) => setDebt(p.debtCOL));
     getTokenBalance(asset, user).then(setBalance);
-    getTokenInfo(asset).then((info) => {
-      setDecimals(info.decimals);
-      setSymbol(info.symbol);
-    });
-  };
-
-  useEffect(() => {
-    getAccount().then(setUser);
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [user, asset]);
-
-  const maxAmount = () => {
-    const debt = position.debt;
-    const bal = balance;
-    const max = debt < bal ? debt : bal;
-    setAmount(ethers.formatUnits(max, decimals));
-  };
+  }, [user, mode, asset]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!amount || !user) return;
+    if (!amount || !user || !pool) return;
     setLoading(true);
     setTx({ status: '', hash: '' });
     try {
-      const amountWei = ethers.parseUnits(amount, decimals);
-      const pool = addresses.lendingPool;
+      const amountWei = ethers.parseUnits(amount, dec);
+      if (amountWei > balance) throw new Error('Insufficient balance');
+      const { getTokenAllowance } = await import('../utils/web3');
       const allowance = await getTokenAllowance(asset, user, pool);
-      if (allowance < amountWei) {
-        await (await approveToken(asset, pool, ethers.MaxUint256)).wait();
-      }
-      const receipt = await repay(asset, amountWei);
+      if (allowance < amountWei) await approveToken(asset, pool, ethers.MaxUint256);
+      const receipt = mode === 'BUSD' ? await repayBUSD(amountWei) : await repayCOL(amountWei);
       setTx({ status: 'success', hash: receipt.hash });
       setAmount('');
-      refresh();
+      if (mode === 'BUSD') getUserPositionPCOL(user).then((p) => setDebt(p.debtBUSD));
+      else getUserPositionPBUSD(user).then((p) => setDebt(p.debtCOL));
+      getTokenBalance(asset, user).then(setBalance);
     } catch (err) {
-      setTx({ status: 'error', hash: err.message || 'Transaction failed' });
+      setTx({ status: 'error', hash: err?.message || 'Failed' });
     } finally {
       setLoading(false);
     }
@@ -75,32 +76,28 @@ export default function RepayPage() {
   return (
     <div className="page">
       <h1>Repay</h1>
-      <p className="muted">Repay your borrowed {symbol}. Approve token first if needed.</p>
+      <p className="muted">Repay BUSD debt (PCOL position) or COL debt (PBUSD position).</p>
       {!user && <p className="muted">Connect MetaMask first.</p>}
       {user && (
         <div className="card">
-          <p><strong>Your debt:</strong> {ethers.formatUnits(position.debt, decimals)} {symbol}</p>
-          <p><strong>Wallet balance:</strong> {ethers.formatUnits(balance, decimals)} {symbol}</p>
+          <div className="form-group">
+            <label>Debt type</label>
+            <select value={mode} onChange={(e) => setMode(e.target.value)} style={{ maxWidth: 320, padding: '0.6rem 0.75rem', borderRadius: 8 }}>
+              <option value="BUSD">Repay BUSD</option>
+              <option value="COL">Repay COL</option>
+            </select>
+          </div>
+          <p>Debt: {fmt(debt, dec)} {symbol} | Wallet: {fmt(balance, dec)}</p>
           <form onSubmit={handleSubmit}>
             <div className="form-group">
-              <label>Amount to repay ({symbol})</label>
-              <input
-                type="text"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0"
-              />
-              <button type="button" className="btn" onClick={maxAmount} style={{ marginTop: 4 }}>Max</button>
+              <label>Amount</label>
+              <input type="text" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" />
             </div>
-            <button type="submit" className="submit-btn" disabled={loading || !amount}>
-              {loading ? 'Repaying...' : 'Repay'}
+            <button type="submit" className="submit-btn" disabled={loading || !amount || debt === 0n}>
+              {loading ? '...' : `Repay ${symbol}`}
             </button>
           </form>
-          {tx.status && (
-            <p className={tx.status === 'success' ? 'success' : 'danger'} style={{ marginTop: '1rem' }}>
-              {tx.status === 'success' ? `Done. Tx: ${tx.hash}` : tx.hash}
-            </p>
-          )}
+          {tx.status && <p className={tx.status === 'success' ? 'success' : 'danger'} style={{ marginTop: '1rem' }}>{tx.status === 'success' ? `Tx: ${tx.hash}` : tx.hash}</p>}
         </div>
       )}
     </div>
